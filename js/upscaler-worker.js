@@ -169,41 +169,28 @@ function imageDataToTensor(imageData, x, y, w, h, srcWidth, srcHeight) {
   return new ort.Tensor('float32', tensor, [1, 3, h, w]);
 }
 
-/* ── Escribir tensor CHW → buffer de salida RGBA ── */
-function tensorToImageData(tensor, outData, dstX, dstY, outW, outH, padLeft, padTop, padRight, padBottom) {
-  const data = tensor.data;
-  const tH = tensor.dims[2];
-  const tW = tensor.dims[3];
-  const writeH = tH - padTop - padBottom;
-  const writeW = tW - padLeft - padRight;
-
-  for (let row = 0; row < writeH; row++) {
-    for (let col = 0; col < writeW; col++) {
-      const srcRow = row + padTop;
-      const srcCol = col + padLeft;
-      const rVal = data[0 * tH * tW + srcRow * tW + srcCol];
-      const gVal = data[1 * tH * tW + srcRow * tW + srcCol];
-      const bVal = data[2 * tH * tW + srcRow * tW + srcCol];
-      const dstIdx = ((dstY + row) * outW + (dstX + col)) * 4;
-      outData[dstIdx]     = Math.max(0, Math.min(255, Math.round(rVal * 255)));
-      outData[dstIdx + 1] = Math.max(0, Math.min(255, Math.round(gVal * 255)));
-      outData[dstIdx + 2] = Math.max(0, Math.min(255, Math.round(bVal * 255)));
-      outData[dstIdx + 3] = 255;
-    }
-  }
-}
-
 /* ── Procesamiento principal por tiles ── */
 async function processImage(imageData, width, height, modelKey, targetScale) {
   const session = await loadModel(modelKey);
 
-  // El modelo hace 2x — para otros scales aplicamos post-procesado
-  const TILE = 64; // tile input size
-  const PAD  = 4;  // padding en pixels
+  // Determinar el ratio real del modelo con un test
+  const testW = 8, testH = 8;
+  const testInput = new ort.Tensor('float32', new Float32Array(3 * testH * testW), [1, 3, testH, testW]);
+  const testFeeds = {};
+  testFeeds[session.inputNames[0]] = testInput;
+  const testResult = await session.run(testFeeds);
+  const testOut = testResult[session.outputNames[0]];
+  const modelScaleH = testOut.dims[2] / testH;
+  const modelScaleW = testOut.dims[3] / testW;
 
-  const outW2x = width  * 2;
-  const outH2x = height * 2;
-  const outPixels = new Uint8ClampedArray(outW2x * outH2x * 4);
+  const TILE = 128; // tile input size (más grande = menos artefactos de borde)
+  const PAD  = 8;   // padding en pixels
+
+  const outW = Math.round(width  * modelScaleW);
+  const outH = Math.round(height * modelScaleH);
+  const outPixels = new Uint8ClampedArray(outW * outH * 4);
+  // Inicializar alpha a 255
+  for (let i = 3; i < outPixels.length; i += 4) outPixels[i] = 255;
 
   const tilesX = Math.ceil(width  / TILE);
   const tilesY = Math.ceil(height / TILE);
@@ -214,21 +201,27 @@ async function processImage(imageData, width, height, modelKey, targetScale) {
 
   for (let ty = 0; ty < tilesY; ty++) {
     for (let tx = 0; tx < tilesX; tx++) {
-      // Coordenadas del tile (con padding)
-      const x0 = Math.max(0, tx * TILE - PAD);
-      const y0 = Math.max(0, ty * TILE - PAD);
-      const x1 = Math.min(width,  (tx + 1) * TILE + PAD);
-      const y1 = Math.min(height, (ty + 1) * TILE + PAD);
+      // Borde útil del tile (sin padding)
+      const tileX0 = tx * TILE;
+      const tileY0 = ty * TILE;
+      const tileX1 = Math.min(width,  (tx + 1) * TILE);
+      const tileY1 = Math.min(height, (ty + 1) * TILE);
+
+      // Con padding (clipeado a límites de imagen)
+      const x0 = Math.max(0, tileX0 - PAD);
+      const y0 = Math.max(0, tileY0 - PAD);
+      const x1 = Math.min(width,  tileX1 + PAD);
+      const y1 = Math.min(height, tileY1 + PAD);
       const tw = x1 - x0;
       const th = y1 - y0;
 
-      // Padding real (puede ser menor en bordes)
-      const padL = tx * TILE - x0;
-      const padT = ty * TILE - y0;
-      const padR = x1 - Math.min(width,  (tx + 1) * TILE);
-      const padB = y1 - Math.min(height, (ty + 1) * TILE);
+      // Padding real añadido (en píxeles de entrada)
+      const padL = tileX0 - x0;
+      const padT = tileY0 - y0;
+      const padR = x1 - tileX1;
+      const padB = y1 - tileY1;
 
-      // Tensor de entrada
+      // Convertir tile a tensor
       const inputTensor = imageDataToTensor(imageData, x0, y0, tw, th, width, height);
 
       // Inferencia
@@ -237,14 +230,43 @@ async function processImage(imageData, width, height, modelKey, targetScale) {
       const results = await session.run(feeds);
       const outTensor = results[session.outputNames[0]];
 
-      // Escribir en el buffer de salida 2x
-      const dstX = tx * TILE * 2;
-      const dstY = ty * TILE * 2;
-      tensorToImageData(
-        outTensor, outPixels,
-        dstX, dstY, outW2x, outH2x,
-        padL * 2, padT * 2, padR * 2, padB * 2
-      );
+      const outTH = outTensor.dims[2];
+      const outTW = outTensor.dims[3];
+
+      // Padding en el tensor de salida (en píxeles de salida)
+      const outPadL = Math.round(padL * modelScaleW);
+      const outPadT = Math.round(padT * modelScaleH);
+      const outPadR = Math.round(padR * modelScaleW);
+      const outPadB = Math.round(padB * modelScaleH);
+
+      // Posición destino en la imagen de salida
+      const dstX = Math.round(tileX0 * modelScaleW);
+      const dstY = Math.round(tileY0 * modelScaleH);
+
+      // Tamaño útil a copiar (excluir padding del tensor de salida)
+      const copyW = outTW - outPadL - outPadR;
+      const copyH = outTH - outPadT - outPadB;
+
+      // Escribir directamente con índices correctos
+      const tensorData = outTensor.data;
+      for (let row = 0; row < copyH; row++) {
+        for (let col = 0; col < copyW; col++) {
+          const srcRow = row + outPadT;
+          const srcCol = col + outPadL;
+          const rVal = tensorData[0 * outTH * outTW + srcRow * outTW + srcCol];
+          const gVal = tensorData[1 * outTH * outTW + srcRow * outTW + srcCol];
+          const bVal = tensorData[2 * outTH * outTW + srcRow * outTW + srcCol];
+          const dstRow = dstY + row;
+          const dstCol = dstX + col;
+          if (dstRow >= 0 && dstRow < outH && dstCol >= 0 && dstCol < outW) {
+            const dstIdx = (dstRow * outW + dstCol) * 4;
+            outPixels[dstIdx]     = Math.max(0, Math.min(255, Math.round(rVal * 255)));
+            outPixels[dstIdx + 1] = Math.max(0, Math.min(255, Math.round(gVal * 255)));
+            outPixels[dstIdx + 2] = Math.max(0, Math.min(255, Math.round(bVal * 255)));
+            outPixels[dstIdx + 3] = 255;
+          }
+        }
+      }
 
       doneTiles++;
       const pct = Math.round(5 + (doneTiles / totalTiles) * 85);
@@ -256,22 +278,20 @@ async function processImage(imageData, width, height, modelKey, targetScale) {
     }
   }
 
-  // Crear ImageData 2x
-  const result2x = new ImageData(outPixels, outW2x, outH2x);
+  // Crear ImageData de salida
+  const result2x = new ImageData(outPixels, outW, outH);
 
-  // Si se pide escala 2x, devolver directamente
-  if (targetScale === 2) {
-    return result2x;
-  }
+  // Si el modelo ya da el scale deseado, devolver
+  if (targetScale === 2) return result2x;
 
   // Para 3x y 4x: escalar desde el resultado 2x con OffscreenCanvas
-  const finalW = width  * targetScale;
-  const finalH = height * targetScale;
+  const finalW = Math.round(width  * targetScale);
+  const finalH = Math.round(height * targetScale);
   const offscreen = new OffscreenCanvas(finalW, finalH);
   const ctx = offscreen.getContext('2d');
 
   // Dibujar el resultado 2x en un canvas temporal
-  const tmpCanvas = new OffscreenCanvas(outW2x, outH2x);
+  const tmpCanvas = new OffscreenCanvas(outW, outH);
   const tmpCtx = tmpCanvas.getContext('2d');
   tmpCtx.putImageData(result2x, 0, 0);
 
