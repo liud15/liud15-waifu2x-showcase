@@ -1,14 +1,13 @@
 /**
- * Waifu2x Extension GUI — Showcase
+ * Waifu2x Online — Upscaler de imágenes anime con IA
  * js/main.js
  *
  * Funcionalidades:
  * - Navbar sticky con glassmorphism al hacer scroll
  * - Menú hamburguesa para móvil
- * - Slider de comparación antes/después (mouse y touch)
- * - Accordion FAQ
  * - Animaciones con IntersectionObserver
  * - Smooth scroll para enlaces internos
+ * - Upscaler online con ONNX Runtime Web (Web Worker)
  */
 
 'use strict';
@@ -143,185 +142,6 @@ function initScrollAnimations() {
 }
 
 initScrollAnimations();
-
-/* ================================================================
-   COMPARADOR ANTES/DESPUÉS — Slider interactivo
-   ================================================================ */
-
-(function initComparisonSlider() {
-  const container    = document.getElementById('comparisonContainer');
-  const slider       = document.getElementById('comparisonSlider');
-  const beforePanel  = container.querySelector('.comparison-before');
-
-  if (!container || !slider || !beforePanel) return;
-
-  let isDragging = false;
-
-  /**
-   * Calcula la posición del slider como porcentaje del contenedor.
-   * @param {number} clientX - Posición X del puntero/toque.
-   * @returns {number} Porcentaje entre 0 y 100.
-   */
-  function getSliderPosition(clientX) {
-    const rect = container.getBoundingClientRect();
-    const x    = clientX - rect.left;
-    const pct  = Math.max(0, Math.min(100, (x / rect.width) * 100));
-    return pct;
-  }
-
-  /**
-   * Actualiza la posición del slider y el clip-path del panel "antes".
-   * @param {number} pct - Porcentaje de posición (0-100).
-   */
-  function updateSlider(pct) {
-    slider.style.left = `${pct}%`;
-    beforePanel.style.clipPath = `inset(0 ${100 - pct}% 0 0)`;
-    slider.setAttribute('aria-valuenow', Math.round(pct));
-  }
-
-  // Inicializar en el 50%
-  updateSlider(50);
-
-  /* ─── Eventos de mouse ─── */
-  slider.addEventListener('mousedown', (e) => {
-    isDragging = true;
-    e.preventDefault();
-  });
-
-  document.addEventListener('mousemove', (e) => {
-    if (!isDragging) return;
-    updateSlider(getSliderPosition(e.clientX));
-  });
-
-  document.addEventListener('mouseup', () => {
-    isDragging = false;
-  });
-
-  /* ─── Eventos de touch ─── */
-  slider.addEventListener('touchstart', (e) => {
-    isDragging = true;
-    e.preventDefault();
-  }, { passive: false });
-
-  document.addEventListener('touchmove', (e) => {
-    if (!isDragging) return;
-    updateSlider(getSliderPosition(e.touches[0].clientX));
-  }, { passive: true });
-
-  document.addEventListener('touchend', () => {
-    isDragging = false;
-  });
-
-  /* ─── Clic directo en el contenedor ─── */
-  container.addEventListener('click', (e) => {
-    if (e.target === slider || slider.contains(e.target)) return;
-    updateSlider(getSliderPosition(e.clientX));
-  });
-
-  /* ─── Control por teclado (accesibilidad) ─── */
-  slider.addEventListener('keydown', (e) => {
-    const currentPct = parseFloat(slider.style.left) || 50;
-    const step = e.shiftKey ? 10 : 2;
-
-    switch (e.key) {
-      case 'ArrowLeft':
-        e.preventDefault();
-        updateSlider(Math.max(0, currentPct - step));
-        break;
-      case 'ArrowRight':
-        e.preventDefault();
-        updateSlider(Math.min(100, currentPct + step));
-        break;
-      case 'Home':
-        e.preventDefault();
-        updateSlider(0);
-        break;
-      case 'End':
-        e.preventDefault();
-        updateSlider(100);
-        break;
-    }
-  });
-})();
-
-/* ================================================================
-   FAQ ACCORDION — Abrir/cerrar preguntas
-   ================================================================ */
-
-(function initFAQAccordion() {
-  const faqItems = document.querySelectorAll('.faq-item');
-
-  faqItems.forEach((item) => {
-    const question = item.querySelector('.faq-question');
-    const answer   = item.querySelector('.faq-answer');
-
-    if (!question || !answer) return;
-
-    // Inicializar: ocultar respuestas (usando max-height en lugar de hidden)
-    // Mantenemos el atributo hidden para semántica, pero lo gestionamos con CSS
-    answer.removeAttribute('hidden');
-    answer.style.maxHeight = '0';
-    answer.style.padding   = '0 1.5rem';
-    answer.style.overflow  = 'hidden';
-
-    question.addEventListener('click', () => {
-      const isExpanded = question.getAttribute('aria-expanded') === 'true';
-
-      // Cerrar todos los demás items
-      faqItems.forEach((otherItem) => {
-        const otherQuestion = otherItem.querySelector('.faq-question');
-        const otherAnswer   = otherItem.querySelector('.faq-answer');
-        if (otherItem !== item && otherAnswer && otherQuestion) {
-          otherQuestion.setAttribute('aria-expanded', 'false');
-          otherAnswer.style.maxHeight = '0';
-          otherAnswer.style.padding   = '0 1.5rem';
-        }
-      });
-
-      // Alternar el item actual
-      if (isExpanded) {
-        question.setAttribute('aria-expanded', 'false');
-        answer.style.maxHeight = '0';
-        answer.style.padding   = '0 1.5rem';
-      } else {
-        question.setAttribute('aria-expanded', 'true');
-        answer.style.maxHeight = answer.scrollHeight + 48 + 'px';
-        answer.style.padding   = '0 1.5rem 1.25rem';
-      }
-    });
-  });
-})();
-
-/* ================================================================
-   INDICADOR DE SECCIÓN ACTIVA EN NAVBAR
-   ================================================================ */
-
-(function initActiveNavLink() {
-  const sections = document.querySelectorAll('section[id]');
-  const navLinksAll = document.querySelectorAll('.nav-link');
-
-  if (!sections.length || !navLinksAll.length) return;
-
-  const sectionObserver = new IntersectionObserver(
-    (entries) => {
-      entries.forEach((entry) => {
-        if (entry.isIntersecting) {
-          navLinksAll.forEach((link) => {
-            link.classList.remove('active');
-            if (link.getAttribute('href') === `#${entry.target.id}`) {
-              link.classList.add('active');
-            }
-          });
-        }
-      });
-    },
-    {
-      rootMargin: '-40% 0px -55% 0px',
-    }
-  );
-
-  sections.forEach((section) => sectionObserver.observe(section));
-})();
 
 /* ================================================================
    UTILIDAD — Reducir animaciones si el usuario lo prefiere
@@ -745,6 +565,7 @@ if (prefersReducedMotion.matches) {
 
         if (msg.type === 'model-cached') {
           updateProgress(8, 'Modelo en caché ✅');
+          hideDownloadProgress();
           // Mostrar brevemente el badge de caché
           if (modelStatus) {
             const subEl = modelStatus.querySelector('.model-status-sub');
@@ -752,9 +573,18 @@ if (prefersReducedMotion.matches) {
           }
         }
 
+        if (msg.type === 'download-start') {
+          showDownloadProgress(0);
+          updateProgress(5, 'Descargando modelo IA… 0%');
+        }
+
         if (msg.type === 'download-progress') {
           showDownloadProgress(msg.percent);
           updateProgress(5 + msg.percent * 0.04, `Descargando modelo IA… ${msg.percent}%`);
+        }
+
+        if (msg.type === 'download-done') {
+          hideDownloadProgress();
         }
 
         if (msg.type === 'progress') {

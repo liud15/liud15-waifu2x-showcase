@@ -1,9 +1,6 @@
 /**
- * Waifu2x Extension GUI — Showcase
- * js/upscaler-worker.js
- *
- * Web Worker dedicado para procesamiento de imágenes con ONNX Runtime Web.
- * Usa los modelos waifu2x cunet de nagadomi/nunif disponibles en HuggingFace.
+ * upscaler-worker.js — Web Worker para upscaling con ONNX Runtime Web
+ * Usa modelos reales de waifu2x (swin_unet) vía deepghs/waifu2x_onnx en HuggingFace
  *
  * Mensajes recibidos:
  *   { type: 'process', imageData, width, height, modelKey, scale }
@@ -11,7 +8,9 @@
  * Mensajes enviados:
  *   { type: 'model-loading', modelKey }
  *   { type: 'model-cached', modelKey }
+ *   { type: 'download-start', modelKey }
  *   { type: 'download-progress', percent }
+ *   { type: 'download-done' }
  *   { type: 'progress', percent, stage }
  *   { type: 'result', imageData }
  *   { type: 'error', message }
@@ -19,121 +18,91 @@
 
 'use strict';
 
-/* ── Importar ONNX Runtime Web ── */
+// Importar ONNX Runtime Web desde CDN
 importScripts('https://cdn.jsdelivr.net/npm/onnxruntime-web@1.18.0/dist/ort.min.js');
 
-/* ── Configurar rutas WASM ── */
+// Configurar paths de WASM antes de crear cualquier sesión
 ort.env.wasm.wasmPaths = 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.18.0/dist/';
+ort.env.wasm.numThreads = 1; // Más estable en workers
 
-/* ── URLs de modelos waifu2x cunet (HuggingFace) ── */
+const HF_BASE = 'https://huggingface.co/deepghs/waifu2x_onnx/resolve/main/20250502/onnx_models/swin_unet';
+
 const MODEL_URLS = {
-  'art-noise0':   'https://huggingface.co/nunif/waifu2x/resolve/main/art/noise0_scale2x_model.onnx',
-  'art-noise1':   'https://huggingface.co/nunif/waifu2x/resolve/main/art/noise1_scale2x_model.onnx',
-  'art-noise2':   'https://huggingface.co/nunif/waifu2x/resolve/main/art/noise2_scale2x_model.onnx',
-  'art-noise3':   'https://huggingface.co/nunif/waifu2x/resolve/main/art/noise3_scale2x_model.onnx',
-  'photo-noise0': 'https://huggingface.co/nunif/waifu2x/resolve/main/photo/noise0_scale2x_model.onnx',
-  'photo-noise1': 'https://huggingface.co/nunif/waifu2x/resolve/main/photo/noise1_scale2x_model.onnx',
-  'photo-noise2': 'https://huggingface.co/nunif/waifu2x/resolve/main/photo/noise2_scale2x_model.onnx',
-  'photo-noise3': 'https://huggingface.co/nunif/waifu2x/resolve/main/photo/noise3_scale2x_model.onnx',
+  'art-noise0':   `${HF_BASE}/art/noise0_scale2x.onnx`,
+  'art-noise1':   `${HF_BASE}/art/noise1_scale2x.onnx`,
+  'art-noise2':   `${HF_BASE}/art/noise2_scale2x.onnx`,
+  'art-noise3':   `${HF_BASE}/art/noise3_scale2x.onnx`,
+  'photo-noise0': `${HF_BASE}/photo/noise0_scale2x.onnx`,
+  'photo-noise1': `${HF_BASE}/photo/noise1_scale2x.onnx`,
+  'photo-noise2': `${HF_BASE}/photo/noise2_scale2x.onnx`,
+  'photo-noise3': `${HF_BASE}/photo/noise3_scale2x.onnx`,
 };
 
-/* ── Constantes de procesamiento ── */
-const TILE_SIZE    = 128; // píxeles por tile (sin padding)
-const TILE_PADDING = 4;   // padding en píxeles para evitar artefactos en bordes
-
-/* ── Caché en memoria de sesiones ONNX ya cargadas ── */
+// Caché en memoria de sesiones ONNX (en memoria del worker)
 const sessionCache = {};
 
-/* ════════════════════════════════════════════════════════════
-   INDEXEDDB — caché de modelos en el navegador
-   ════════════════════════════════════════════════════════════ */
+const DB_NAME  = 'waifu2x-model-cache-v1';
+const DB_STORE = 'models';
 
-const DB_NAME    = 'waifu2x-models-cache';
-const DB_VERSION = 1;
-
-/** Abre (o crea) la base de datos IndexedDB. */
+/* ── IndexedDB helpers ── */
 function openDB() {
   return new Promise((resolve, reject) => {
-    const req = indexedDB.open(DB_NAME, DB_VERSION);
-
+    const req = indexedDB.open(DB_NAME, 1);
     req.onupgradeneeded = (e) => {
-      const db = e.target.result;
-      if (!db.objectStoreNames.contains('models')) {
-        db.createObjectStore('models');
-      }
+      e.target.result.createObjectStore(DB_STORE);
     };
-
     req.onsuccess = (e) => resolve(e.target.result);
-    req.onerror   = (e) => reject(e.target.error);
+    req.onerror = () => reject(req.error);
   });
 }
 
-/** Recupera un modelo guardado en IndexedDB. Retorna ArrayBuffer o null. */
-async function getCachedModel(key) {
+async function getFromDB(key) {
   try {
     const db = await openDB();
-    return new Promise((resolve, reject) => {
-      const tx  = db.transaction('models', 'readonly');
-      const req = tx.objectStore('models').get(key);
-      req.onsuccess = (e) => resolve(e.target.result || null);
-      req.onerror   = (e) => reject(e.target.error);
+    return new Promise((resolve) => {
+      const tx = db.transaction(DB_STORE, 'readonly');
+      const req = tx.objectStore(DB_STORE).get(key);
+      req.onsuccess = () => resolve(req.result || null);
+      req.onerror = () => resolve(null);
     });
-  } catch {
-    return null; // IndexedDB no disponible — continuar sin caché
-  }
+  } catch { return null; }
 }
 
-/** Guarda un ArrayBuffer de modelo en IndexedDB. */
-async function cacheModel(key, data) {
+async function saveToDB(key, data) {
   try {
     const db = await openDB();
-    return new Promise((resolve, reject) => {
-      const tx  = db.transaction('models', 'readwrite');
-      const req = tx.objectStore('models').put(data, key);
-      req.onsuccess = () => resolve();
-      req.onerror   = (e) => reject(e.target.error);
+    return new Promise((resolve) => {
+      const tx = db.transaction(DB_STORE, 'readwrite');
+      tx.objectStore(DB_STORE).put(data, key);
+      tx.oncomplete = resolve;
+      tx.onerror = resolve; // No critical
     });
-  } catch {
-    // Si IndexedDB falla, continuar sin persistir
-  }
+  } catch {}
 }
 
-/* ════════════════════════════════════════════════════════════
-   CARGA DE MODELO — con descarga progresiva y caché
-   ════════════════════════════════════════════════════════════ */
-
-/**
- * Carga el modelo ONNX para un modelKey dado.
- * Usa caché en memoria > IndexedDB > descarga desde HuggingFace.
- *
- * @param {string} modelKey - Clave del modelo (p. ej. 'art-noise2').
- * @returns {Promise<ort.InferenceSession>}
- */
+/* ── Cargar modelo ONNX ── */
 async function loadModel(modelKey) {
-  // 1. Caché en memoria (sesión ya creada)
-  if (sessionCache[modelKey]) {
-    return sessionCache[modelKey];
-  }
+  if (sessionCache[modelKey]) return sessionCache[modelKey];
+
+  const url = MODEL_URLS[modelKey];
+  if (!url) throw new Error(`Modelo desconocido: ${modelKey}`);
 
   self.postMessage({ type: 'model-loading', modelKey });
 
-  let modelBuffer = null;
+  // Intentar desde IndexedDB
+  let modelBuffer = await getFromDB(modelKey);
 
-  // 2. Intentar recuperar de IndexedDB
-  modelBuffer = await getCachedModel(modelKey);
+  if (!modelBuffer) {
+    // Descargar con progreso
+    self.postMessage({ type: 'download-start', modelKey });
 
-  if (modelBuffer) {
-    self.postMessage({ type: 'model-cached', modelKey });
-  } else {
-    // 3. Descargar desde HuggingFace con progreso
-    const url = MODEL_URLS[modelKey];
     const response = await fetch(url);
+    if (!response.ok) throw new Error(`HTTP ${response.status} al descargar modelo`);
 
-    if (!response.ok) {
-      throw new Error(`Error descargando modelo: ${response.status} ${response.statusText}`);
-    }
+    const contentLength = response.headers.get('Content-Length');
+    const total = contentLength ? parseInt(contentLength, 10) : 0;
 
-    const contentLength = parseInt(response.headers.get('content-length') || '0', 10);
+    // Leer con progreso
     const reader = response.body.getReader();
     const chunks = [];
     let received = 0;
@@ -143,375 +112,187 @@ async function loadModel(modelKey) {
       if (done) break;
       chunks.push(value);
       received += value.length;
-
-      if (contentLength > 0) {
-        self.postMessage({
-          type:    'download-progress',
-          percent: Math.round((received / contentLength) * 100),
-        });
+      if (total > 0) {
+        const pct = Math.round((received / total) * 100);
+        self.postMessage({ type: 'download-progress', percent: pct });
       }
     }
 
-    // Combinar chunks en un único ArrayBuffer
-    const data = new Uint8Array(received);
-    let pos = 0;
+    // Concatenar chunks
+    modelBuffer = new Uint8Array(received);
+    let offset = 0;
     for (const chunk of chunks) {
-      data.set(chunk, pos);
-      pos += chunk.length;
+      modelBuffer.set(chunk, offset);
+      offset += chunk.length;
     }
-    modelBuffer = data.buffer;
 
-    // Persistir en IndexedDB para futuros usos
-    await cacheModel(modelKey, modelBuffer);
+    // Guardar en caché
+    await saveToDB(modelKey, modelBuffer);
+    self.postMessage({ type: 'download-done' });
+  } else {
+    self.postMessage({ type: 'model-cached', modelKey });
   }
 
-  // 4. Crear sesión de inferencia ONNX
-  const session = await ort.InferenceSession.create(modelBuffer, {
-    executionProviders:      ['wasm'],
-    graphOptimizationLevel:  'all',
+  // Crear sesión ONNX
+  self.postMessage({ type: 'progress', percent: 0, stage: 'Cargando motor IA...' });
+
+  // modelBuffer puede ser Uint8Array o ArrayBuffer — manejar ambos casos
+  const buffer = modelBuffer instanceof Uint8Array ? modelBuffer.buffer : modelBuffer;
+  const session = await ort.InferenceSession.create(buffer, {
+    executionProviders: ['wasm'],
+    graphOptimizationLevel: 'all',
   });
 
   sessionCache[modelKey] = session;
   return session;
 }
 
-/* ════════════════════════════════════════════════════════════
-   CONVERSIÓN DE PÍXELES — RGBA uint8 ↔ CHW Float32
-   ════════════════════════════════════════════════════════════ */
+/* ── Conversión ImageData → Tensor CHW Float32 ── */
+function imageDataToTensor(imageData, x, y, w, h, srcWidth, srcHeight) {
+  const pixels = imageData.data;
+  const tensor = new Float32Array(3 * h * w);
+  const rOff = 0;
+  const gOff = h * w;
+  const bOff = 2 * h * w;
 
-/**
- * Convierte datos RGBA (Uint8ClampedArray) a tensor CHW Float32 normalizado [0, 1].
- *
- * @param {Uint8ClampedArray} rgba - Datos RGBA lineales (4 bytes por píxel).
- * @param {number} w - Ancho de la imagen.
- * @param {number} h - Alto de la imagen.
- * @returns {Float32Array} Tensor CHW: [R canal][G canal][B canal], cada canal de tamaño w*h.
- */
-function rgbaToChw(rgba, w, h) {
-  const pixels = w * h;
-  const chw    = new Float32Array(3 * pixels);
-
-  for (let i = 0; i < pixels; i++) {
-    chw[i]               = rgba[i * 4]     / 255; // R
-    chw[pixels + i]      = rgba[i * 4 + 1] / 255; // G
-    chw[pixels * 2 + i]  = rgba[i * 4 + 2] / 255; // B
-  }
-
-  return chw;
-}
-
-/**
- * Convierte un tensor CHW Float32 normalizado [0, 1] a RGBA Uint8ClampedArray.
- *
- * @param {Float32Array} chw - Tensor CHW de salida del modelo.
- * @param {number} w - Ancho de la imagen de salida.
- * @param {number} h - Alto de la imagen de salida.
- * @returns {Uint8ClampedArray} Datos RGBA.
- */
-function chwToRgba(chw, w, h) {
-  const pixels = w * h;
-  const rgba   = new Uint8ClampedArray(pixels * 4);
-
-  for (let i = 0; i < pixels; i++) {
-    rgba[i * 4]     = Math.max(0, Math.min(255, Math.round(chw[i]               * 255))); // R
-    rgba[i * 4 + 1] = Math.max(0, Math.min(255, Math.round(chw[pixels + i]      * 255))); // G
-    rgba[i * 4 + 2] = Math.max(0, Math.min(255, Math.round(chw[pixels * 2 + i]  * 255))); // B
-    rgba[i * 4 + 3] = 255; // A totalmente opaco
-  }
-
-  return rgba;
-}
-
-/* ════════════════════════════════════════════════════════════
-   EXTRACCIÓN DE TILES — desde ImageData plano (RGBA)
-   ════════════════════════════════════════════════════════════ */
-
-/**
- * Extrae un tile (región rectangular) de un array RGBA plano.
- *
- * @param {Uint8ClampedArray} srcData - Array RGBA de la imagen fuente.
- * @param {number} srcW - Ancho de la imagen fuente.
- * @param {number} srcH - Alto de la imagen fuente.
- * @param {number} x - Columna inicial del tile.
- * @param {number} y - Fila inicial del tile.
- * @param {number} tw - Ancho del tile.
- * @param {number} th - Alto del tile.
- * @returns {Uint8ClampedArray} Datos RGBA del tile.
- */
-function extractTile(srcData, srcW, srcH, x, y, tw, th) {
-  const tileData = new Uint8ClampedArray(tw * th * 4);
-
-  for (let row = 0; row < th; row++) {
-    const srcRow = Math.max(0, Math.min(srcH - 1, y + row));
-
-    for (let col = 0; col < tw; col++) {
-      const sc = Math.max(0, Math.min(srcW - 1, x + col));
-      const si = (srcRow * srcW + sc) * 4;
-      const di = (row * tw + col) * 4;
-      tileData[di]     = srcData[si];
-      tileData[di + 1] = srcData[si + 1];
-      tileData[di + 2] = srcData[si + 2];
-      tileData[di + 3] = srcData[si + 3];
+  for (let row = 0; row < h; row++) {
+    for (let col = 0; col < w; col++) {
+      const srcX = Math.min(x + col, srcWidth - 1);
+      const srcY = Math.min(y + row, srcHeight - 1);
+      const srcIdx = (srcY * srcWidth + srcX) * 4;
+      const dstIdx = row * w + col;
+      tensor[rOff + dstIdx] = pixels[srcIdx]     / 255.0;
+      tensor[gOff + dstIdx] = pixels[srcIdx + 1] / 255.0;
+      tensor[bOff + dstIdx] = pixels[srcIdx + 2] / 255.0;
     }
   }
-
-  return tileData;
+  return new ort.Tensor('float32', tensor, [1, 3, h, w]);
 }
 
-/**
- * Copia píxeles de un tile de salida al array RGBA de destino.
- *
- * @param {Uint8ClampedArray} dstData    - Array RGBA destino.
- * @param {number} dstStride             - Ancho (stride) de la imagen destino en píxeles.
- * @param {Uint8ClampedArray} tileData   - Array RGBA del tile de salida.
- * @param {number} tileW  - Ancho del tile de salida.
- * @param {number} tileH  - Alto del tile de salida.
- * @param {number} dstX   - Columna inicial en destino.
- * @param {number} dstY   - Fila inicial en destino.
- * @param {number} dstClampW - Ancho máximo permitido del destino (para clamp de bordes).
- * @param {number} dstClampH - Alto máximo permitido del destino (para clamp de bordes).
- */
-function pasteTile(dstData, dstStride, tileData, tileW, tileH, dstX, dstY, dstClampW, dstClampH) {
-  for (let row = 0; row < tileH; row++) {
-    const dy = dstY + row;
-    if (dy < 0 || dy >= dstClampH) continue;
+/* ── Escribir tensor CHW → buffer de salida RGBA ── */
+function tensorToImageData(tensor, outData, dstX, dstY, outW, outH, padLeft, padTop, padRight, padBottom) {
+  const data = tensor.data;
+  const tH = tensor.dims[2];
+  const tW = tensor.dims[3];
+  const writeH = tH - padTop - padBottom;
+  const writeW = tW - padLeft - padRight;
 
-    for (let col = 0; col < tileW; col++) {
-      const dx = dstX + col;
-      if (dx < 0 || dx >= dstClampW) continue;
-
-      const si = (row * tileW + col) * 4;
-      const di = (dy * dstStride + dx) * 4;
-
-      dstData[di]     = tileData[si];
-      dstData[di + 1] = tileData[si + 1];
-      dstData[di + 2] = tileData[si + 2];
-      dstData[di + 3] = tileData[si + 3];
+  for (let row = 0; row < writeH; row++) {
+    for (let col = 0; col < writeW; col++) {
+      const srcRow = row + padTop;
+      const srcCol = col + padLeft;
+      const rVal = data[0 * tH * tW + srcRow * tW + srcCol];
+      const gVal = data[1 * tH * tW + srcRow * tW + srcCol];
+      const bVal = data[2 * tH * tW + srcRow * tW + srcCol];
+      const dstIdx = ((dstY + row) * outW + (dstX + col)) * 4;
+      outData[dstIdx]     = Math.max(0, Math.min(255, Math.round(rVal * 255)));
+      outData[dstIdx + 1] = Math.max(0, Math.min(255, Math.round(gVal * 255)));
+      outData[dstIdx + 2] = Math.max(0, Math.min(255, Math.round(bVal * 255)));
+      outData[dstIdx + 3] = 255;
     }
   }
 }
 
-/* ════════════════════════════════════════════════════════════
-   INFERENCIA POR TILES — upscale 2x con un modelo ONNX
-   ════════════════════════════════════════════════════════════ */
+/* ── Procesamiento principal por tiles ── */
+async function processImage(imageData, width, height, modelKey, targetScale) {
+  const session = await loadModel(modelKey);
 
-/**
- * Aplica el modelo waifu2x 2x sobre una imagen entera procesando por tiles.
- *
- * @param {ort.InferenceSession} session   - Sesión ONNX activa.
- * @param {Uint8ClampedArray}    srcData   - Datos RGBA de la imagen fuente.
- * @param {number}               srcW      - Ancho fuente.
- * @param {number}               srcH      - Alto fuente.
- * @param {Function}             onProgress- Callback (completedTiles, totalTiles).
- * @returns {Promise<{data: Uint8ClampedArray, width: number, height: number}>}
- */
-async function runUpscale2x(session, srcData, srcW, srcH, onProgress) {
-  const dstW    = srcW * 2;
-  const dstH    = srcH * 2;
-  const dstData = new Uint8ClampedArray(dstW * dstH * 4);
+  // El modelo hace 2x — para otros scales aplicamos post-procesado
+  const TILE = 64; // tile input size
+  const PAD  = 4;  // padding en pixels
 
-  const cols  = Math.ceil(srcW / TILE_SIZE);
-  const rows  = Math.ceil(srcH / TILE_SIZE);
-  const total = cols * rows;
-  let   done  = 0;
+  const outW2x = width  * 2;
+  const outH2x = height * 2;
+  const outPixels = new Uint8ClampedArray(outW2x * outH2x * 4);
 
-  const inputName  = session.inputNames[0];
-  const outputName = session.outputNames[0];
+  const tilesX = Math.ceil(width  / TILE);
+  const tilesY = Math.ceil(height / TILE);
+  const totalTiles = tilesX * tilesY;
+  let doneTiles = 0;
 
-  for (let row = 0; row < rows; row++) {
-    for (let col = 0; col < cols; col++) {
-      const tileX = col * TILE_SIZE;
-      const tileY = row * TILE_SIZE;
-      const tileW = Math.min(TILE_SIZE, srcW - tileX);
-      const tileH = Math.min(TILE_SIZE, srcH - tileY);
+  self.postMessage({ type: 'progress', percent: 5, stage: 'Procesando con IA...' });
 
-      // Región con padding (clamped a bordes de la imagen)
-      const padX  = Math.max(0, tileX - TILE_PADDING);
-      const padY  = Math.max(0, tileY - TILE_PADDING);
-      const padX2 = Math.min(srcW, tileX + tileW + TILE_PADDING);
-      const padY2 = Math.min(srcH, tileY + tileH + TILE_PADDING);
-      const padW  = padX2 - padX;
-      const padH  = padY2 - padY;
+  for (let ty = 0; ty < tilesY; ty++) {
+    for (let tx = 0; tx < tilesX; tx++) {
+      // Coordenadas del tile (con padding)
+      const x0 = Math.max(0, tx * TILE - PAD);
+      const y0 = Math.max(0, ty * TILE - PAD);
+      const x1 = Math.min(width,  (tx + 1) * TILE + PAD);
+      const y1 = Math.min(height, (ty + 1) * TILE + PAD);
+      const tw = x1 - x0;
+      const th = y1 - y0;
 
-      // Cuánto padding real se añadió a cada borde
-      const leftPad = tileX - padX;
-      const topPad  = tileY - padY;
+      // Padding real (puede ser menor en bordes)
+      const padL = tx * TILE - x0;
+      const padT = ty * TILE - y0;
+      const padR = x1 - Math.min(width,  (tx + 1) * TILE);
+      const padB = y1 - Math.min(height, (ty + 1) * TILE);
 
-      // Extraer tile (con padding) de la imagen fuente
-      const tileRgba = extractTile(srcData, srcW, srcH, padX, padY, padW, padH);
-
-      // Convertir a tensor CHW Float32
-      const chw    = rgbaToChw(tileRgba, padW, padH);
-      const tensor = new ort.Tensor('float32', chw, [1, 3, padH, padW]);
+      // Tensor de entrada
+      const inputTensor = imageDataToTensor(imageData, x0, y0, tw, th, width, height);
 
       // Inferencia
-      const feeds   = { [inputName]: tensor };
+      const feeds = {};
+      feeds[session.inputNames[0]] = inputTensor;
       const results = await session.run(feeds);
-      const output  = results[outputName];
+      const outTensor = results[session.outputNames[0]];
 
-      // Tensor de salida: [1, 3, padH*2, padW*2]
-      const outH = padH * 2;
-      const outW = padW * 2;
+      // Escribir en el buffer de salida 2x
+      const dstX = tx * TILE * 2;
+      const dstY = ty * TILE * 2;
+      tensorToImageData(
+        outTensor, outPixels,
+        dstX, dstY, outW2x, outH2x,
+        padL * 2, padT * 2, padR * 2, padB * 2
+      );
 
-      // Convertir salida CHW Float32 → RGBA
-      const outRgba = chwToRgba(output.data, outW, outH);
+      doneTiles++;
+      const pct = Math.round(5 + (doneTiles / totalTiles) * 85);
+      self.postMessage({ type: 'progress', percent: pct, stage: `Tiles ${doneTiles}/${totalTiles}...` });
 
-      // Recortar el padding de la salida y pegar en destino
-      const cropX = leftPad * 2;
-      const cropY = topPad  * 2;
-      const cropW = tileW   * 2;
-      const cropH = tileH   * 2;
-
-      // Extraer región útil del tile de salida
-      const croppedRgba = extractTile(outRgba, outW, outH, cropX, cropY, cropW, cropH);
-
-      // Pegar en imagen destino
-      pasteTile(dstData, dstW, croppedRgba, cropW, cropH, tileX * 2, tileY * 2, dstW, dstH);
-
-      done++;
-      onProgress(done, total);
+      // Yield al event loop cada 4 tiles para permitir que los mensajes de progreso
+      // se procesen en el hilo principal y evitar que el worker bloquee indefinidamente
+      if (doneTiles % 4 === 0) await new Promise(r => setTimeout(r, 0));
     }
   }
 
-  return { data: dstData, width: dstW, height: dstH };
-}
+  // Crear ImageData 2x
+  const result2x = new ImageData(outPixels, outW2x, outH2x);
 
-/* ════════════════════════════════════════════════════════════
-   ESCALADO CON OFFSCREENCANVAS — para escala 3x
-   ════════════════════════════════════════════════════════════ */
-
-/**
- * Escala una imagen (representada como RGBA plano) a nuevas dimensiones
- * usando OffscreenCanvas (disponible en Workers modernos).
- *
- * @param {Uint8ClampedArray} srcData - Datos RGBA.
- * @param {number} srcW - Ancho fuente.
- * @param {number} srcH - Alto fuente.
- * @param {number} dstW - Ancho destino.
- * @param {number} dstH - Alto destino.
- * @returns {Uint8ClampedArray} Datos RGBA escalados.
- */
-function canvasScale(srcData, srcW, srcH, dstW, dstH) {
-  // Canvas fuente
-  const srcCanvas = new OffscreenCanvas(srcW, srcH);
-  const srcCtx    = srcCanvas.getContext('2d');
-  const srcImg    = new ImageData(srcData, srcW, srcH);
-  srcCtx.putImageData(srcImg, 0, 0);
-
-  // Canvas destino
-  const dstCanvas = new OffscreenCanvas(dstW, dstH);
-  const dstCtx    = dstCanvas.getContext('2d');
-  dstCtx.imageSmoothingEnabled = true;
-  dstCtx.imageSmoothingQuality = 'high';
-  dstCtx.drawImage(srcCanvas, 0, 0, dstW, dstH);
-
-  return dstCtx.getImageData(0, 0, dstW, dstH).data;
-}
-
-/* ════════════════════════════════════════════════════════════
-   PROCESAMIENTO PRINCIPAL — upscale completo según escala
-   ════════════════════════════════════════════════════════════ */
-
-/**
- * Realiza el upscaling completo de una imagen para la escala solicitada.
- *
- * @param {ort.InferenceSession} session  - Sesión ONNX.
- * @param {Uint8ClampedArray}    srcData  - Datos RGBA de la imagen original.
- * @param {number}               srcW     - Ancho original.
- * @param {number}               srcH     - Alto original.
- * @param {number}               scale    - Factor de escala (2, 3 o 4).
- * @returns {Promise<ImageData>}
- */
-async function processImage(session, srcData, srcW, srcH, scale) {
-  const dstW = srcW * scale;
-  const dstH = srcH * scale;
-
-  if (scale === 2) {
-    // — Escala 2x: un único paso con el modelo —
-    const result = await runUpscale2x(session, srcData, srcW, srcH, (done, total) => {
-      self.postMessage({
-        type:    'progress',
-        percent: Math.round(10 + (done / total) * 85),
-        stage:   'Aplicando IA waifu2x…',
-      });
-    });
-
-    return new ImageData(result.data, result.width, result.height);
-
-  } else if (scale === 4) {
-    // — Escala 4x: dos pasos de 2x consecutivos —
-
-    // Paso 1: 1x → 2x
-    const step1 = await runUpscale2x(session, srcData, srcW, srcH, (done, total) => {
-      self.postMessage({
-        type:    'progress',
-        percent: Math.round(10 + (done / total) * 40),
-        stage:   'Aplicando IA (paso 1/2)…',
-      });
-    });
-
-    self.postMessage({ type: 'progress', percent: 50, stage: 'Aplicando IA (paso 2/2)…' });
-
-    // Paso 2: 2x → 4x
-    const step2 = await runUpscale2x(session, step1.data, step1.width, step1.height, (done, total) => {
-      self.postMessage({
-        type:    'progress',
-        percent: Math.round(50 + (done / total) * 45),
-        stage:   'Aplicando IA (paso 2/2)…',
-      });
-    });
-
-    return new ImageData(step2.data, step2.width, step2.height);
-
-  } else {
-    // — Escala 3x: modelo 2x + escalado Canvas hasta 3x —
-
-    const step1 = await runUpscale2x(session, srcData, srcW, srcH, (done, total) => {
-      self.postMessage({
-        type:    'progress',
-        percent: Math.round(10 + (done / total) * 80),
-        stage:   'Aplicando IA waifu2x…',
-      });
-    });
-
-    self.postMessage({ type: 'progress', percent: 92, stage: 'Ajustando a escala 3x…' });
-
-    // Escalar de 2x a 3x con Canvas (el 50% restante de ampliación es pequeño)
-    const scaledData = canvasScale(step1.data, step1.width, step1.height, dstW, dstH);
-    return new ImageData(scaledData, dstW, dstH);
+  // Si se pide escala 2x, devolver directamente
+  if (targetScale === 2) {
+    return result2x;
   }
+
+  // Para 3x y 4x: escalar desde el resultado 2x con OffscreenCanvas
+  const finalW = width  * targetScale;
+  const finalH = height * targetScale;
+  const offscreen = new OffscreenCanvas(finalW, finalH);
+  const ctx = offscreen.getContext('2d');
+
+  // Dibujar el resultado 2x en un canvas temporal
+  const tmpCanvas = new OffscreenCanvas(outW2x, outH2x);
+  const tmpCtx = tmpCanvas.getContext('2d');
+  tmpCtx.putImageData(result2x, 0, 0);
+
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(tmpCanvas, 0, 0, finalW, finalH);
+
+  return ctx.getImageData(0, 0, finalW, finalH);
 }
 
-/* ════════════════════════════════════════════════════════════
-   MANEJADOR DE MENSAJES
-   ════════════════════════════════════════════════════════════ */
-
+/* ── Handler principal ── */
 self.onmessage = async (e) => {
   const { type, imageData, width, height, modelKey, scale } = e.data;
 
   if (type !== 'process') return;
 
   try {
-    self.postMessage({ type: 'progress', percent: 5, stage: 'Cargando modelo IA…' });
-
-    // Cargar (o recuperar de caché) el modelo
-    const session = await loadModel(modelKey);
-
-    self.postMessage({ type: 'progress', percent: 10, stage: 'Modelo listo. Procesando…' });
-
-    // Procesar la imagen
-    const srcData  = imageData.data;
-    const resultId = await processImage(session, srcData, width, height, scale);
-
-    self.postMessage({ type: 'progress', percent: 100, stage: '¡Listo!' });
-
-    // Transferir ImageData al hilo principal
-    self.postMessage({ type: 'result', imageData: resultId });
-
+    const result = await processImage(imageData, width, height, modelKey, scale || 2);
+    self.postMessage({ type: 'result', imageData: result }, [result.data.buffer]);
   } catch (err) {
-    self.postMessage({
-      type:    'error',
-      message: err && err.message ? err.message : String(err),
-    });
+    console.error('[Worker] Error:', err);
+    self.postMessage({ type: 'error', message: err && err.message ? err.message : String(err) });
   }
 };
