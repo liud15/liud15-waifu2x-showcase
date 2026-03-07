@@ -16,14 +16,12 @@
  *   { type: 'error', message }
  */
 
-'use strict';
-
-// Importar ONNX Runtime Web desde CDN
-importScripts('https://cdn.jsdelivr.net/npm/onnxruntime-web@1.18.0/dist/ort.min.js');
+// Importar ONNX Runtime Web como módulo ES (compatible con GitHub Pages)
+import * as ort from 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.21.0/dist/ort.mjs';
 
 // Configurar paths de WASM antes de crear cualquier sesión
-ort.env.wasm.wasmPaths = 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.18.0/dist/';
-ort.env.wasm.numThreads = 1; // Más estable en workers
+ort.env.wasm.wasmPaths = 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.21.0/dist/';
+ort.env.wasm.numThreads = 1;
 
 const HF_BASE = 'https://huggingface.co/deepghs/waifu2x_onnx/resolve/main/20250502/onnx_models/swin_unet';
 

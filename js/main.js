@@ -210,11 +210,18 @@ if (prefersReducedMotion.matches) {
   ──────────────────────────────────────────────── */
 
   try {
-    worker = new Worker('js/upscaler-worker.js');
+    worker = new Worker('js/upscaler-worker.js', { type: 'module' });
     workerAvailable = true;
 
     worker.onerror = (err) => {
       console.warn('Error en el Worker de upscaling — usando modo fallback Canvas.', err);
+      // Mostrar aviso en el badge de estado
+      if (modelStatus) {
+        const titleEl = modelStatus.querySelector('.model-status-title');
+        const subEl   = modelStatus.querySelector('.model-status-sub');
+        if (titleEl) titleEl.textContent = '⚠️ IA no disponible';
+        if (subEl)   subEl.textContent   = 'Usando modo Canvas mejorado';
+      }
       workerAvailable = false;
       worker = null;
     };
