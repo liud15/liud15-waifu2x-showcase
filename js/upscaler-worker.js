@@ -1,6 +1,6 @@
 /**
  * upscaler-worker.js — Web Worker para upscaling con ONNX Runtime Web
- * Usa modelos reales de waifu2x (swin_unet) vía deepghs/waifu2x_onnx en HuggingFace
+ * Usa modelos cunet de waifu2x (nagadomi/nunif) en HuggingFace — mismos que unlimited.waifu2x.net
  *
  * Mensajes recibidos:
  *   { type: 'process', imageData, width, height, modelKey, scale }
@@ -23,23 +23,23 @@ import * as ort from 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.21.0/dist/o
 ort.env.wasm.wasmPaths = 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.21.0/dist/';
 ort.env.wasm.numThreads = 1;
 
-const HF_BASE = 'https://huggingface.co/deepghs/waifu2x_onnx/resolve/main/20250502/onnx_models/swin_unet';
+const HF_BASE = 'https://huggingface.co/nagadomi/nunif/resolve/master/waifu2x/pretrained_models';
 
 const MODEL_URLS = {
-  'art-noise0':   `${HF_BASE}/art/noise0_scale2x.onnx`,
-  'art-noise1':   `${HF_BASE}/art/noise1_scale2x.onnx`,
-  'art-noise2':   `${HF_BASE}/art/noise2_scale2x.onnx`,
-  'art-noise3':   `${HF_BASE}/art/noise3_scale2x.onnx`,
-  'photo-noise0': `${HF_BASE}/photo/noise0_scale2x.onnx`,
-  'photo-noise1': `${HF_BASE}/photo/noise1_scale2x.onnx`,
-  'photo-noise2': `${HF_BASE}/photo/noise2_scale2x.onnx`,
-  'photo-noise3': `${HF_BASE}/photo/noise3_scale2x.onnx`,
+  'art-noise0':   `${HF_BASE}/cunet/art/noise0_scale2.0x_model.onnx`,
+  'art-noise1':   `${HF_BASE}/cunet/art/noise1_scale2.0x_model.onnx`,
+  'art-noise2':   `${HF_BASE}/cunet/art/noise2_scale2.0x_model.onnx`,
+  'art-noise3':   `${HF_BASE}/cunet/art/noise3_scale2.0x_model.onnx`,
+  'photo-noise0': `${HF_BASE}/cunet/photo/noise0_scale2.0x_model.onnx`,
+  'photo-noise1': `${HF_BASE}/cunet/photo/noise1_scale2.0x_model.onnx`,
+  'photo-noise2': `${HF_BASE}/cunet/photo/noise2_scale2.0x_model.onnx`,
+  'photo-noise3': `${HF_BASE}/cunet/photo/noise3_scale2.0x_model.onnx`,
 };
 
 // Caché en memoria de sesiones ONNX (en memoria del worker)
 const sessionCache = {};
 
-const DB_NAME  = 'waifu2x-model-cache-v1';
+const DB_NAME  = 'waifu2x-model-cache-v2';
 const DB_STORE = 'models';
 
 /* ── IndexedDB helpers ── */
@@ -140,6 +140,9 @@ async function loadModel(modelKey) {
     executionProviders: ['wasm'],
     graphOptimizationLevel: 'all',
   });
+
+  console.log('[Worker] Session inputNames:', session.inputNames);
+  console.log('[Worker] Session outputNames:', session.outputNames);
 
   sessionCache[modelKey] = session;
   return session;
