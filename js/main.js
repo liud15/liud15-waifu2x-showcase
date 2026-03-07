@@ -745,6 +745,7 @@ if (prefersReducedMotion.matches) {
 
         if (msg.type === 'model-cached') {
           updateProgress(8, 'Modelo en caché ✅');
+          hideDownloadProgress();
           // Mostrar brevemente el badge de caché
           if (modelStatus) {
             const subEl = modelStatus.querySelector('.model-status-sub');
@@ -752,9 +753,18 @@ if (prefersReducedMotion.matches) {
           }
         }
 
+        if (msg.type === 'download-start') {
+          showDownloadProgress(0);
+          updateProgress(5, 'Descargando modelo IA… 0%');
+        }
+
         if (msg.type === 'download-progress') {
           showDownloadProgress(msg.percent);
           updateProgress(5 + msg.percent * 0.04, `Descargando modelo IA… ${msg.percent}%`);
+        }
+
+        if (msg.type === 'download-done') {
+          hideDownloadProgress();
         }
 
         if (msg.type === 'progress') {
