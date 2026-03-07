@@ -47,6 +47,7 @@
         <li><a class="nav-link" href="#parametros">Parámetros</a></li>
         <li><a class="nav-link" href="#comparador">Comparador</a></li>
         <li><a class="nav-link" href="#caracteristicas">Características</a></li>
+        <li><a class="nav-link" href="#upscaler">🌐 Online</a></li>
         <li><a class="nav-link" href="#descarga">Descarga</a></li>
         <li><a class="nav-link" href="#faq">FAQ</a></li>
         <li>
@@ -683,6 +684,137 @@
           <div>
             <h3 class="feature-title">Solo para Windows</h3>
             <p class="feature-desc">Optimizado exclusivamente para Windows 10 y 11, aprovechando al máximo las APIs del sistema operativo.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ==================== UPSCALER ONLINE ==================== -->
+  <section class="section section--alt" id="upscaler" aria-labelledby="upscalerTitle">
+    <div class="container">
+      <div class="section-header animate-on-scroll">
+        <span class="section-badge">🌐 Online · Sin instalación · 100% Privado</span>
+        <h2 class="section-title" id="upscalerTitle">Pruébalo <span class="gradient-text">Online</span> 🌐</h2>
+        <p class="section-desc">Mejora la resolución de tus imágenes directamente en tu navegador. Sin instalar nada. El procesamiento ocurre 100% en tu dispositivo.</p>
+      </div>
+
+      <div class="upscaler-layout animate-on-scroll">
+
+        <!-- Panel izquierdo: controles -->
+        <div class="upscaler-controls">
+
+          <!-- Zona de carga -->
+          <div class="upload-zone" id="uploadZone" role="button" tabindex="0" aria-label="Zona de carga de imagen. Arrastra una imagen o haz clic para seleccionar">
+            <div class="upload-zone-inner" id="uploadZoneInner">
+              <svg class="upload-icon" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                <polyline points="17 8 12 3 7 8"/>
+                <line x1="12" y1="3" x2="12" y2="15"/>
+              </svg>
+              <p class="upload-text">Arrastra tu imagen aquí</p>
+              <p class="upload-subtext">o haz clic para seleccionar</p>
+              <p class="upload-formats">JPG · PNG · WebP · Máx. 20 MB</p>
+            </div>
+            <input type="file" id="imageInput" accept="image/jpeg,image/png,image/webp" class="upload-input" aria-hidden="true" tabindex="-1" />
+          </div>
+
+          <!-- Vista previa de imagen original -->
+          <div class="upscaler-preview" id="upscalerPreview" hidden>
+            <p class="control-label">Vista previa original</p>
+            <img id="previewImg" class="preview-image" alt="Imagen original seleccionada" />
+            <p class="preview-info" id="previewInfo"></p>
+          </div>
+
+          <!-- Controles de parámetros -->
+          <div class="upscaler-params" id="upscalerParams" hidden>
+            <div class="param-group">
+              <p class="control-label">Escala de salida</p>
+              <div class="param-options upscaler-param-options" role="group" aria-label="Seleccionar escala">
+                <button class="param-option upscaler-option" data-param="scale" data-value="2" aria-pressed="true">2x</button>
+                <button class="param-option upscaler-option" data-param="scale" data-value="3" aria-pressed="false">3x</button>
+                <button class="param-option upscaler-option" data-param="scale" data-value="4" aria-pressed="false">4x</button>
+              </div>
+            </div>
+
+            <div class="param-group">
+              <p class="control-label">Nivel de denoise</p>
+              <div class="param-options upscaler-param-options" role="group" aria-label="Seleccionar nivel de denoise">
+                <button class="param-option upscaler-option" data-param="denoise" data-value="0" aria-pressed="true">0 — Ninguno</button>
+                <button class="param-option upscaler-option" data-param="denoise" data-value="1" aria-pressed="false">1 — Suave</button>
+                <button class="param-option upscaler-option" data-param="denoise" data-value="2" aria-pressed="false">2 — Medio</button>
+                <button class="param-option upscaler-option" data-param="denoise" data-value="3" aria-pressed="false">3 — Fuerte</button>
+              </div>
+            </div>
+
+            <button class="btn btn-primary upscaler-process-btn" id="processBtn" type="button">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+              </svg>
+              ✨ Procesar imagen
+            </button>
+          </div>
+
+          <!-- Barra de progreso -->
+          <div class="upscaler-progress" id="upscalerProgress" hidden>
+            <p class="control-label progress-label" id="progressLabel">Procesando…</p>
+            <div class="progress-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-label="Progreso del procesamiento">
+              <div class="progress-fill" id="progressFill"></div>
+            </div>
+            <p class="progress-pct" id="progressPct">0%</p>
+          </div>
+
+          <!-- Badge de privacidad -->
+          <div class="upscaler-info-badge">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+            </svg>
+            Procesamiento 100% local en tu navegador — tus imágenes nunca se envían a ningún servidor.
+          </div>
+        </div>
+
+        <!-- Panel derecho: resultado -->
+        <div class="upscaler-result" id="upscalerResult">
+          <div class="result-placeholder" id="resultPlaceholder">
+            <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" opacity="0.3" aria-hidden="true">
+              <rect x="3" y="3" width="18" height="18" rx="2"/>
+              <circle cx="8.5" cy="8.5" r="1.5"/>
+              <polyline points="21 15 16 10 5 21"/>
+            </svg>
+            <p>El resultado aparecerá aquí</p>
+          </div>
+
+          <div class="result-content" id="resultContent" hidden>
+            <div class="result-comparison">
+              <div class="result-panel">
+                <span class="result-panel-label">Antes</span>
+                <canvas id="beforeCanvas" class="result-canvas"></canvas>
+              </div>
+              <div class="result-panel">
+                <span class="result-panel-label">Después</span>
+                <canvas id="afterCanvas" class="result-canvas"></canvas>
+              </div>
+            </div>
+
+            <div class="result-stats" id="resultStats"></div>
+
+            <div class="result-actions">
+              <button class="btn btn-primary" id="downloadBtn" type="button">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                  <polyline points="7 10 12 15 17 10"/>
+                  <line x1="12" y1="15" x2="12" y2="3"/>
+                </svg>
+                Descargar PNG
+              </button>
+              <button class="btn btn-secondary" id="resetBtn" type="button">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                  <polyline points="1 4 1 10 7 10"/>
+                  <path d="M3.51 15a9 9 0 1 0 .49-4.73L1 10"/>
+                </svg>
+                Procesar otra imagen
+              </button>
+            </div>
           </div>
         </div>
       </div>

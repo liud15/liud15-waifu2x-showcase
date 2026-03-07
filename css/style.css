@@ -1462,3 +1462,355 @@ body {
     scroll-behavior: auto;
   }
 }
+
+/* ── Sección Upscaler Online ────────────────────────────────── */
+
+/* Cuadrícula principal: controles a la izquierda, resultado a la derecha */
+.upscaler-layout {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2rem;
+  align-items: start;
+}
+
+/* ─── Panel de controles ─── */
+.upscaler-controls {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 1.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+/* ─── Zona de drag & drop ─── */
+.upload-zone {
+  position: relative;
+  border: 2px dashed rgba(124, 58, 237, 0.35);
+  border-radius: var(--radius-md);
+  padding: 2.5rem 1.5rem;
+  text-align: center;
+  cursor: pointer;
+  transition: border-color var(--transition), background var(--transition), box-shadow var(--transition);
+  background: rgba(124, 58, 237, 0.04);
+}
+
+.upload-zone:hover,
+.upload-zone:focus-within {
+  border-color: var(--purple-light);
+  background: rgba(124, 58, 237, 0.08);
+}
+
+/* Estado mientras se arrastra un archivo encima */
+.upload-zone.drag-over {
+  border-color: var(--purple-light);
+  background: rgba(124, 58, 237, 0.12);
+  box-shadow: 0 0 0 4px rgba(124, 58, 237, 0.15), var(--glow-purple);
+}
+
+/* Estado con imagen ya cargada (zona compacta) */
+.upload-zone.has-image {
+  padding: 1rem;
+  border-style: solid;
+  border-color: rgba(124, 58, 237, 0.3);
+}
+
+.upload-zone.has-image .upload-zone-inner {
+  display: none;
+}
+
+/* Input de archivo oculto */
+.upload-input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.upload-icon {
+  color: var(--purple-light);
+  margin-bottom: 0.75rem;
+  display: block;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.upload-text {
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 0.25rem;
+}
+
+.upload-subtext {
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+  margin-bottom: 0.5rem;
+}
+
+.upload-formats {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  letter-spacing: 0.03em;
+}
+
+/* ─── Vista previa de imagen original ─── */
+.upscaler-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.preview-image {
+  width: 100%;
+  max-height: 200px;
+  object-fit: contain;
+  border-radius: var(--radius-sm);
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.preview-info {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+/* ─── Etiquetas de control ─── */
+.control-label {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: 0.5rem;
+}
+
+/* ─── Grupos de parámetros ─── */
+.upscaler-params {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.param-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+/* Opciones interactivas del upscaler (botones, no spans) */
+.upscaler-param-options {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.upscaler-option {
+  cursor: pointer;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: var(--radius-sm);
+  padding: 0.35rem 0.85rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  font-family: var(--font-body);
+  transition: background var(--transition), border-color var(--transition), color var(--transition);
+}
+
+.upscaler-option:hover {
+  background: rgba(124, 58, 237, 0.1);
+  border-color: rgba(124, 58, 237, 0.3);
+  color: var(--text-primary);
+}
+
+.upscaler-option.param-option--active,
+.upscaler-option[aria-pressed="true"] {
+  background: rgba(124, 58, 237, 0.2);
+  border-color: rgba(124, 58, 237, 0.5);
+  color: var(--purple-light);
+}
+
+/* Botón de procesamiento */
+.upscaler-process-btn {
+  width: 100%;
+  justify-content: center;
+  font-size: 1rem;
+}
+
+/* ─── Barra de progreso ─── */
+.upscaler-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.progress-label {
+  margin-bottom: 0;
+}
+
+.progress-bar {
+  width: 100%;
+  height: 8px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, var(--purple), var(--blue));
+  border-radius: 999px;
+  transition: width 0.15s ease;
+}
+
+@keyframes progress-shimmer {
+  0%   { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+.progress-fill.animating {
+  background-size: 200% 100%;
+  background-image: linear-gradient(90deg, var(--purple), var(--blue), var(--purple-light), var(--blue));
+  animation: progress-shimmer 1.5s linear infinite;
+}
+
+.progress-pct {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  text-align: right;
+}
+
+/* ─── Badge de privacidad ─── */
+.upscaler-info-badge {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  background: rgba(16, 185, 129, 0.06);
+  border: 1px solid rgba(16, 185, 129, 0.18);
+  border-radius: var(--radius-sm);
+  padding: 0.6rem 0.85rem;
+  line-height: 1.5;
+}
+
+.upscaler-info-badge svg {
+  color: #34d399;
+  flex-shrink: 0;
+  margin-top: 0.1rem;
+}
+
+/* ─── Panel de resultado ─── */
+.upscaler-result {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 1.75rem;
+  min-height: 400px;
+  display: flex;
+  flex-direction: column;
+}
+
+.result-placeholder {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+
+.result-content {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+/* Comparación antes / después */
+.result-comparison {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+}
+
+.result-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.result-panel-label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  text-align: center;
+}
+
+.result-canvas {
+  width: 100%;
+  height: auto;
+  border-radius: var(--radius-sm);
+  background: rgba(0, 0, 0, 0.25);
+  display: block;
+  max-height: 280px;
+  object-fit: contain;
+}
+
+/* Estadísticas del resultado */
+.result-stats {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: var(--radius-sm);
+  padding: 0.75rem 1rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.5rem;
+}
+
+.result-stat {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.result-stat strong {
+  color: var(--purple-light);
+}
+
+/* Botones de acción del resultado */
+.result-actions {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.result-actions .btn {
+  flex: 1;
+  justify-content: center;
+  min-width: 0;
+}
+
+/* ─── Responsive: una columna en pantallas pequeñas ─── */
+@media (max-width: 768px) {
+  .upscaler-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .result-comparison {
+    grid-template-columns: 1fr;
+  }
+
+  .result-actions {
+    flex-direction: column;
+  }
+}
