@@ -694,9 +694,9 @@
   <section class="section section--alt" id="upscaler" aria-labelledby="upscalerTitle">
     <div class="container">
       <div class="section-header animate-on-scroll">
-        <span class="section-badge">🌐 Online · Sin instalación · 100% Privado</span>
+        <span class="section-badge">🤖 IA Real · ONNX Runtime Web · 100% Local</span>
         <h2 class="section-title" id="upscalerTitle">Pruébalo <span class="gradient-text">Online</span> 🌐</h2>
-        <p class="section-desc">Mejora la resolución de tus imágenes directamente en tu navegador. Sin instalar nada. El procesamiento ocurre 100% en tu dispositivo.</p>
+        <p class="section-desc">Mejora la resolución de tus imágenes con <strong>modelos waifu2x reales</strong> (cunet de nagadomi/nunif), directamente en tu navegador. Sin servidores. Sin instalación. Los modelos corren 100% en tu dispositivo con ONNX Runtime Web.</p>
       </div>
 
       <div class="upscaler-layout animate-on-scroll">
@@ -728,30 +728,63 @@
 
           <!-- Controles de parámetros -->
           <div class="upscaler-params" id="upscalerParams" hidden>
+
+            <!-- Tipo de imagen -->
+            <div class="param-group">
+              <p class="control-label">Tipo de imagen</p>
+              <div class="param-options upscaler-param-options" role="group" aria-label="Seleccionar tipo de imagen" id="modelTypeOptions">
+                <button class="param-option upscaler-option param-option--active" data-param="modelType" data-value="art" aria-pressed="true">🎨 Anime / Arte</button>
+                <button class="param-option upscaler-option" data-param="modelType" data-value="photo" aria-pressed="false">📷 Foto / Real</button>
+              </div>
+            </div>
+
+            <!-- Escala de salida -->
             <div class="param-group">
               <p class="control-label">Escala de salida</p>
               <div class="param-options upscaler-param-options" role="group" aria-label="Seleccionar escala">
-                <button class="param-option upscaler-option" data-param="scale" data-value="2" aria-pressed="true">2x</button>
+                <button class="param-option upscaler-option param-option--active" data-param="scale" data-value="2" aria-pressed="true">2x</button>
                 <button class="param-option upscaler-option" data-param="scale" data-value="3" aria-pressed="false">3x</button>
                 <button class="param-option upscaler-option" data-param="scale" data-value="4" aria-pressed="false">4x</button>
               </div>
             </div>
 
+            <!-- Nivel de denoise -->
             <div class="param-group">
               <p class="control-label">Nivel de denoise</p>
               <div class="param-options upscaler-param-options" role="group" aria-label="Seleccionar nivel de denoise">
-                <button class="param-option upscaler-option" data-param="denoise" data-value="0" aria-pressed="true">0 — Ninguno</button>
+                <button class="param-option upscaler-option param-option--active" data-param="denoise" data-value="0" aria-pressed="true">0 — Ninguno</button>
                 <button class="param-option upscaler-option" data-param="denoise" data-value="1" aria-pressed="false">1 — Suave</button>
                 <button class="param-option upscaler-option" data-param="denoise" data-value="2" aria-pressed="false">2 — Medio</button>
                 <button class="param-option upscaler-option" data-param="denoise" data-value="3" aria-pressed="false">3 — Fuerte</button>
               </div>
             </div>
 
+            <!-- Estado del modelo IA -->
+            <div class="model-status" id="modelStatus">
+              <div class="model-status-icon" aria-hidden="true">🤖</div>
+              <div class="model-status-text">
+                <span class="model-status-title">Motor IA listo</span>
+                <span class="model-status-sub">El modelo se descargará al procesar (~15-30 MB)</span>
+              </div>
+            </div>
+
+            <!-- Progreso de descarga del modelo (solo visible durante descarga) -->
+            <div class="model-download-progress" id="modelDownloadProgress" hidden>
+              <div class="model-download-label">
+                <span>⬇️ Descargando modelo IA…</span>
+                <span id="modelDownloadPct">0%</span>
+              </div>
+              <div class="progress-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-label="Progreso de descarga del modelo">
+                <div class="progress-fill" id="modelDownloadBar" style="width:0%"></div>
+              </div>
+              <small>Solo la primera vez · Se guarda en tu navegador</small>
+            </div>
+
             <button class="btn btn-primary upscaler-process-btn" id="processBtn" type="button">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
                 <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
               </svg>
-              ✨ Procesar imagen
+              ✨ Procesar con IA
             </button>
           </div>
 
@@ -762,6 +795,13 @@
               <div class="progress-fill" id="progressFill"></div>
             </div>
             <p class="progress-pct" id="progressPct">0%</p>
+          </div>
+
+          <!-- Estado de error (fallback) -->
+          <div class="upscaler-error" id="upscalerError" hidden>
+            <span class="upscaler-error-icon" aria-hidden="true">⚠️</span>
+            <p id="upscalerErrorMsg">Error al procesar la imagen.</p>
+            <button class="btn btn-secondary upscaler-retry-btn" id="retryBtn" type="button">Reintentar</button>
           </div>
 
           <!-- Badge de privacidad -->
@@ -791,7 +831,7 @@
                 <canvas id="beforeCanvas" class="result-canvas"></canvas>
               </div>
               <div class="result-panel">
-                <span class="result-panel-label">Después</span>
+                <span class="result-panel-label">Después (IA)</span>
                 <canvas id="afterCanvas" class="result-canvas"></canvas>
               </div>
             </div>
