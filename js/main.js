@@ -214,13 +214,16 @@ if (prefersReducedMotion.matches) {
     workerAvailable = true;
 
     worker.onerror = (err) => {
-      console.warn('Error en el Worker de upscaling — usando modo fallback Canvas.', err);
+      const msg = err.message || 'Error desconocido';
+      const file = err.filename || '';
+      const line = err.lineno || '';
+      console.error(`[Worker] Error en ${file}:${line} — ${msg}`, err);
       // Mostrar aviso en el badge de estado
       if (modelStatus) {
         const titleEl = modelStatus.querySelector('.model-status-title');
         const subEl   = modelStatus.querySelector('.model-status-sub');
         if (titleEl) titleEl.textContent = '⚠️ IA no disponible';
-        if (subEl)   subEl.textContent   = 'Usando modo Canvas mejorado';
+        if (subEl)   subEl.textContent   = `Error: ${msg} — usando modo Canvas`;
       }
       workerAvailable = false;
       worker = null;
@@ -605,11 +608,11 @@ if (prefersReducedMotion.matches) {
 
         if (msg.type === 'error') {
           console.warn('Error ONNX, ejecutando fallback Canvas:', msg.message);
-          // Mostrar aviso y caer en fallback
+          // Mostrar aviso con el mensaje real del error y caer en fallback
           workerAvailable = false;
           const notice = document.createElement('div');
-          notice.className = 'model-cache-badge';
-          notice.textContent = '⚠️ IA no disponible — usando modo mejorado';
+          notice.className = 'model-cache-badge model-cache-badge--error';
+          notice.textContent = `⚠️ Error IA: ${msg.message} — usando modo mejorado`;
           if (modelStatus && modelStatus.parentNode) {
             modelStatus.parentNode.insertBefore(notice, modelStatus);
           }
