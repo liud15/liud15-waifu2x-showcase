@@ -148,10 +148,19 @@ async function loadModel(modelKey) {
   // SOLUCIÓN AL ERROR
   // Usar solo los bytes reales del modelo
 
-  const cleanBuffer =
-    modelBuffer instanceof Uint8Array
-      ? modelBuffer.slice().buffer
-      : modelBuffer;
+  let modelData;
+  if (modelBuffer instanceof Uint8Array) {
+    modelData = modelBuffer;
+  } else if (modelBuffer instanceof ArrayBuffer) {
+    modelData = new Uint8Array(modelBuffer);
+  } else {
+    throw new Error("Formato de modelo inválido");
+  }
+
+const session = await ort.InferenceSession.create(modelData, {
+  executionProviders: ['wasm'],
+  graphOptimizationLevel: 'all'
+});
 
   const session = await ort.InferenceSession.create(cleanBuffer, {
     executionProviders: ['wasm'],
