@@ -31,7 +31,7 @@ const MODEL_URLS = {
   'photo-noise0': `${MODELS_BASE}/photo/noise0_scale2x.onnx`,
   'photo-noise1': `${MODELS_BASE}/photo/noise1_scale2x.onnx`,
   'photo-noise2': `${MODELS_BASE}/photo/noise2_scale2x.onnx`,
-  'photo-noise3': `${MODELS_BASE}/photo/noise3_scale2x.onnx`,,
+  'photo-noise3': `${MODELS_BASE}/photo/noise3_scale2x.onnx`,
 };
 
 const sessionCache = {};
