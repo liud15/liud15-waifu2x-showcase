@@ -1,6 +1,6 @@
 /**
  * upscaler-worker.js — Web Worker para upscaling con ONNX Runtime Web
- * Usa modelos swin_unet de waifu2x desde liud15/waifu2x-models vía jsDelivr CDN (CORS)
+ * Usa modelos swin_unet de waifu2x desde liud15/waifu2x-models vía raw.githubusercontent.com (CORS)
  *
  * Mensajes recibidos:
  *   { type: 'process', imageData, width, height, modelKey, scale }
@@ -23,8 +23,8 @@ import * as ort from 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.21.0/dist/o
 ort.env.wasm.wasmPaths = 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.21.0/dist/';
 ort.env.wasm.numThreads = 1;
 
-// jsDelivr sirve archivos del repo Git con CORS habilitado (tag v1.0.0)
-const MODELS_BASE = 'https://cdn.jsdelivr.net/gh/liud15/waifu2x-models@v1.0.0/swin_unet';
+// raw.githubusercontent.com sirve binarios directos con CORS habilitado (sin compresión)
+const MODELS_BASE = 'https://raw.githubusercontent.com/liud15/waifu2x-models/main/swin_unet';
 
 const MODEL_URLS = {
   'art-noise0':   `${MODELS_BASE}/art/noise0_scale2x.onnx`,
@@ -40,7 +40,7 @@ const MODEL_URLS = {
 // Caché en memoria de sesiones ONNX (en memoria del worker)
 const sessionCache = {};
 
-const DB_NAME  = 'waifu2x-model-cache-v4';
+const DB_NAME  = 'waifu2x-model-cache-v5';
 const DB_STORE = 'models';
 
 /* ── IndexedDB helpers ── */
@@ -95,7 +95,8 @@ async function loadModel(modelKey) {
     // Descargar con progreso
     self.postMessage({ type: 'download-start', modelKey });
 
-    const response = await fetch(url);
+    // Usar fetch sin compresión para asegurar bytes raw del ONNX
+    const response = await fetch(url, { headers: { 'Accept-Encoding': 'identity' } });
     if (!response.ok) throw new Error(`HTTP ${response.status} al descargar modelo`);
 
     const contentLength = response.headers.get('Content-Length');
@@ -125,11 +126,14 @@ async function loadModel(modelKey) {
       offset += chunk.length;
     }
 
+    console.log(`[Worker] Descargado: ${received} bytes, magic: 0x${modelBuffer[0].toString(16).padStart(2,'0')} 0x${modelBuffer[1].toString(16).padStart(2,'0')}`);
+
     // Guardar en caché
     await saveToDB(modelKey, modelBuffer);
     self.postMessage({ type: 'download-done' });
   } else {
     self.postMessage({ type: 'model-cached', modelKey });
+    console.log(`[Worker] Desde caché: ${modelBuffer.byteLength || modelBuffer.length} bytes`);
   }
 
   // Crear sesión ONNX
