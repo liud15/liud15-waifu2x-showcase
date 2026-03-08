@@ -1,6 +1,6 @@
 /**
  * upscaler-worker.js — Web Worker para upscaling con ONNX Runtime Web
- * Usa modelos cunet de waifu2x (nagadomi/nunif) en HuggingFace — mismos que unlimited.waifu2x.net
+ * Usa modelos swin_unet de waifu2x desde liud15/waifu2x-models (GitHub Releases)
  *
  * Mensajes recibidos:
  *   { type: 'process', imageData, width, height, modelKey, scale }
@@ -23,23 +23,23 @@ import * as ort from 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.21.0/dist/o
 ort.env.wasm.wasmPaths = 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.21.0/dist/';
 ort.env.wasm.numThreads = 1;
 
-const HF_BASE = 'https://huggingface.co/nagadomi/nunif/resolve/master/waifu2x/pretrained_models';
+const MODELS_BASE = 'https://github.com/liud15/waifu2x-models/releases/download/v1.0.0';
 
 const MODEL_URLS = {
-  'art-noise0':   `${HF_BASE}/cunet/art/noise0_scale2.0x_model.onnx`,
-  'art-noise1':   `${HF_BASE}/cunet/art/noise1_scale2.0x_model.onnx`,
-  'art-noise2':   `${HF_BASE}/cunet/art/noise2_scale2.0x_model.onnx`,
-  'art-noise3':   `${HF_BASE}/cunet/art/noise3_scale2.0x_model.onnx`,
-  'photo-noise0': `${HF_BASE}/cunet/photo/noise0_scale2.0x_model.onnx`,
-  'photo-noise1': `${HF_BASE}/cunet/photo/noise1_scale2.0x_model.onnx`,
-  'photo-noise2': `${HF_BASE}/cunet/photo/noise2_scale2.0x_model.onnx`,
-  'photo-noise3': `${HF_BASE}/cunet/photo/noise3_scale2.0x_model.onnx`,
+  'art-noise0':   `${MODELS_BASE}/art_noise0_scale2x.onnx`,
+  'art-noise1':   `${MODELS_BASE}/art_noise1_scale2x.onnx`,
+  'art-noise2':   `${MODELS_BASE}/art_noise2_scale2x.onnx`,
+  'art-noise3':   `${MODELS_BASE}/art_noise3_scale2x.onnx`,
+  'photo-noise0': `${MODELS_BASE}/photo_noise0_scale2x.onnx`,
+  'photo-noise1': `${MODELS_BASE}/photo_noise1_scale2x.onnx`,
+  'photo-noise2': `${MODELS_BASE}/photo_noise2_scale2x.onnx`,
+  'photo-noise3': `${MODELS_BASE}/photo_noise3_scale2x.onnx`,
 };
 
 // Caché en memoria de sesiones ONNX (en memoria del worker)
 const sessionCache = {};
 
-const DB_NAME  = 'waifu2x-model-cache-v2';
+const DB_NAME  = 'waifu2x-model-cache-v3';
 const DB_STORE = 'models';
 
 /* ── IndexedDB helpers ── */
