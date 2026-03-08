@@ -1,6 +1,6 @@
 /**
  * upscaler-worker.js — Web Worker para upscaling con ONNX Runtime Web
- * Usa modelos swin_unet de waifu2x desde liud15/waifu2x-models (GitHub Releases)
+ * Usa modelos swin_unet de waifu2x desde liud15/waifu2x-models vía jsDelivr CDN (CORS)
  *
  * Mensajes recibidos:
  *   { type: 'process', imageData, width, height, modelKey, scale }
@@ -23,23 +23,24 @@ import * as ort from 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.21.0/dist/o
 ort.env.wasm.wasmPaths = 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.21.0/dist/';
 ort.env.wasm.numThreads = 1;
 
-const MODELS_BASE = 'https://github.com/liud15/waifu2x-models/releases/download/v1.0.0';
+// jsDelivr sirve archivos del repo Git con CORS habilitado (tag v1.0.0)
+const MODELS_BASE = 'https://cdn.jsdelivr.net/gh/liud15/waifu2x-models@v1.0.0/swin_unet';
 
 const MODEL_URLS = {
-  'art-noise0':   `${MODELS_BASE}/art_noise0_scale2x.onnx`,
-  'art-noise1':   `${MODELS_BASE}/art_noise1_scale2x.onnx`,
-  'art-noise2':   `${MODELS_BASE}/art_noise2_scale2x.onnx`,
-  'art-noise3':   `${MODELS_BASE}/art_noise3_scale2x.onnx`,
-  'photo-noise0': `${MODELS_BASE}/photo_noise0_scale2x.onnx`,
-  'photo-noise1': `${MODELS_BASE}/photo_noise1_scale2x.onnx`,
-  'photo-noise2': `${MODELS_BASE}/photo_noise2_scale2x.onnx`,
-  'photo-noise3': `${MODELS_BASE}/photo_noise3_scale2x.onnx`,
+  'art-noise0':   `${MODELS_BASE}/art/noise0_scale2x.onnx`,
+  'art-noise1':   `${MODELS_BASE}/art/noise1_scale2x.onnx`,
+  'art-noise2':   `${MODELS_BASE}/art/noise2_scale2x.onnx`,
+  'art-noise3':   `${MODELS_BASE}/art/noise3_scale2x.onnx`,
+  'photo-noise0': `${MODELS_BASE}/photo/noise0_scale2x.onnx`,
+  'photo-noise1': `${MODELS_BASE}/photo/noise1_scale2x.onnx`,
+  'photo-noise2': `${MODELS_BASE}/photo/noise2_scale2x.onnx`,
+  'photo-noise3': `${MODELS_BASE}/photo/noise3_scale2x.onnx`,
 };
 
 // Caché en memoria de sesiones ONNX (en memoria del worker)
 const sessionCache = {};
 
-const DB_NAME  = 'waifu2x-model-cache-v3';
+const DB_NAME  = 'waifu2x-model-cache-v4';
 const DB_STORE = 'models';
 
 /* ── IndexedDB helpers ── */
